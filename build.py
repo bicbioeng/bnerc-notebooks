@@ -68,7 +68,7 @@ def fetch(acc, source):
     try:
         if source in ("cyanobacteria_ncbi", "cyanobacteria_gtdb"):
             # Assembly accessions (GCA_/GCF_): NCBI Datasets CLI
-            subprocess.run([_datasets_cli(), "download", "genome", "accession", acc, "--include", "genome", "--filename", f"{acc}.zip"], check=True)
+            subprocess.run([_datasets_cli(), "download", "genome", "accession", acc, "--include", globals().get("DATASETS_INCLUDE", "genome"), "--filename", f"{acc}.zip"], check=True)
             with zipfile.ZipFile(f"{acc}.zip") as z:
                 z.extractall(f"genome_{acc}")
             hits = glob.glob(f"genome_{acc}/ncbi_dataset/data/*/*.fna")
@@ -186,6 +186,53 @@ for f in glob.glob("output/fig_*/*.html"):
 '''),
 ])
 
+genome_browser = nb([
+    md("# Genome browser with IGV", INTRO, "",
+       "Downloads each selected genome (and, for NCBI assemblies, its gene annotation) and opens it in an interactive IGV genome browser ([igv-notebook](https://github.com/igvteam/igv-notebook)). Zoom, search a gene name or locus, and click a gene for details.",
+       "", "**How to run:** paste the records BNERC copied into `RECORDS` below, then choose **Runtime → Run all**. The first 3 genomes are shown."),
+    code(PARAMS, form=True),
+    md("## 1. Install igv-notebook"),
+    code('''
+%pip install -q igv-notebook biopython
+DATASETS_INCLUDE = "genome,gff3"  # NCBI assemblies: sequence plus gene annotation
+'''),
+    md("## 2. Download sequences and annotation"),
+    code(FETCH, form=True),
+    md("## 3. Browse"),
+    code('''
+import igv_notebook
+igv_notebook.init()
+
+def faidx(path):
+    # Writes the samtools-style .fai index igv.js needs (one fixed line width per sequence).
+    rows, name, pos = [], None, 0
+    with open(path, "rb") as f:
+        for line in f:
+            if line.startswith(b">"):
+                if name:
+                    rows.append((name, length, start, bases, width))
+                name, length, start, bases, width = line[1:].split()[0].decode(), 0, pos + len(line), 0, 0
+            elif name and line.strip():
+                n = len(line.rstrip(b"\\r\\n"))
+                if not bases:
+                    bases, width = n, len(line)
+                length += n
+            pos += len(line)
+    if name:
+        rows.append((name, length, start, bases, width))
+    with open(path + ".fai", "w") as out:
+        out.writelines("\\t".join(map(str, r)) + "\\n" for r in rows)
+    return rows
+
+for acc in [a for a in accessions if os.path.exists(f"{a}.fna") and os.path.getsize(f"{a}.fna")][:3]:
+    seqs = faidx(f"{acc}.fna")
+    gff = glob.glob(f"genome_{acc}/ncbi_dataset/data/*/genomic.gff")
+    tracks = [{"name": "Genes", "path": gff[0], "format": "gff3", "type": "annotation", "displayMode": "EXPANDED", "filterTypes": ["chromosome", "gene", "region"]}] if gff else []
+    print(f"{acc}: {len(seqs)} sequence(s), {sum(r[1] for r in seqs):,} bp" + ("" if gff else " (no gene annotation available)"))
+    igv_notebook.Browser({"reference": {"id": acc, "name": acc, "fastaPath": f"{acc}.fna", "indexPath": f"{acc}.fna.fai"}, "locus": seqs[0][0], "tracks": tracks})
+'''),
+])
+
 GEO_PARAMS = '''
 #@title GEO series to analyze
 #@markdown Paste the GEO accessions BNERC copied for you (e.g. `GSE12345, GSE67890`).
@@ -224,6 +271,6 @@ for s, t in tables.items():
 ])
 
 out = pathlib.Path(__file__).parent
-for name, n in [("comparative-genomics", comparative), ("pangenome", pangenome), ("geo-expression", geo)]:
+for name, n in [("comparative-genomics", comparative), ("pangenome", pangenome), ("geo-expression", geo), ("genome-browser", genome_browser)]:
     (out / f"{name}.ipynb").write_text(json.dumps(n, indent=1, ensure_ascii=False) + "\n")
     print("wrote", name)
