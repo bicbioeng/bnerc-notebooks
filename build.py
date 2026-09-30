@@ -15,7 +15,7 @@ def nb(cells):
     return {"cells": cells, "metadata": {"kernelspec": {"display_name": "Python 3", "language": "python", "name": "python3"},
             "language_info": {"name": "python"}, "colab": {"provenance": []}}, "nbformat": 4, "nbformat_minor": 5}
 
-INTRO = "Opened from **BNERC**, the Bionitrogen Fixation Research Database (BicBioEng lab, University of South Dakota)."
+INTRO = "Opened from **BNERC**, the research database of the Bio-Nitrogen Economy Research Center (BicBioEng Lab, University of South Dakota)."
 
 PARAMS = '''
 #@title Records to analyze
@@ -45,8 +45,12 @@ print(f"{len(records)} record(s):", ", ".join(f"{a} ({s})" for a, s in records))
 
 FETCH = '''
 #@title Download genomes as FASTA (.fna)
-import glob, os, shutil, subprocess, urllib.request, zipfile
-from Bio import Entrez
+import glob, os, shutil, subprocess, sys, urllib.request, zipfile
+try:
+    from Bio import Entrez
+except ImportError:  # the install cell was skipped, or its pip went to another Python
+    subprocess.run([sys.executable, "-m", "pip", "install", "-q", "biopython"], check=True)
+    from Bio import Entrez
 Entrez.email = NCBI_EMAIL
 
 def _datasets_cli():
@@ -94,7 +98,7 @@ comparative = nb([
        "", "**How to run:** paste the records BNERC copied into `RECORDS` below, then choose **Runtime → Run all**."),
     code(PARAMS, form=True),
     md("## 1. Install tools"),
-    code("!pip -q install biopython pandas matplotlib\n!apt-get -qq install -y ncbi-blast+ > /dev/null && blastn -version | head -1"),
+    code("%pip install -q biopython pandas matplotlib\n!apt-get -qq install -y ncbi-blast+ > /dev/null && blastn -version | head -1"),
     md("## 2. Download sequences"),
     code(FETCH, form=True),
     md("## 3. Build one BLAST database"),
@@ -133,12 +137,17 @@ pangenome = nb([
        "Downloads each selected genome, then annotates, clusters and partitions them into core, shell and cloud genes with PPanGGOLiN, and draws the U-curve and tile plot. Use at least 3 genomes.",
        "", "**How to run:** paste the records BNERC copied into `RECORDS` below, then choose **Runtime → Run all**. Installing PPanGGOLiN takes a few minutes."),
     code(PARAMS, form=True),
-    md("## 1. Install PPanGGOLiN (via Miniconda)"),
+    md("## 1. Install PPanGGOLiN"),
     code('''
-!wget -nc -q https://repo.anaconda.com/miniconda/Miniconda3-latest-Linux-x86_64.sh
-!bash Miniconda3-latest-Linux-x86_64.sh -b -f -p /usr/local > /dev/null
-!conda install -y -q -c conda-forge -c bioconda ppanggolin > /dev/null
-!pip -q install biopython
+# PPanGGOLiN gets its own environment under /opt, so Colab's Python and pip stay
+# untouched (installing Miniconda over /usr/local replaced Colab's pip, and
+# biopython then went where this notebook can't import it).
+import os
+if not os.path.exists("/opt/ppg/bin/ppanggolin"):
+    !curl -Ls https://micro.mamba.pm/api/micromamba/linux-64/latest | tar -xj -C /usr/local bin/micromamba
+    !micromamba create -y -q -p /opt/ppg -c conda-forge -c bioconda ppanggolin > /dev/null
+os.environ["PATH"] += ":/opt/ppg/bin"  # appended: never shadows Colab's python/pip
+%pip install -q biopython
 !ppanggolin --version
 '''),
     md("## 2. Download sequences"),
